@@ -1,0 +1,185 @@
+#!/usr/bin/env python2
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Dec  8 11:52:56 2018
+
+@author: JeremyNey
+"""
+
+%matplotlib inline
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats
+from ast import literal_eval
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics.pairwise import linear_kernel, cosine_similarity
+from nltk.stem.snowball import SnowballStemmer
+from nltk.stem.wordnet import WordNetLemmatizer
+from nltk.corpus import wordnet
+import warnings; warnings.simplefilter('ignore')
+import unicodedata
+
+#import code
+metadata = pd.read_csv("/Users/JeremyNey/Downloads/movies_metadata.csv", low_memory=False, encoding = 'utf8')
+keywords = pd.read_csv("/Users/JeremyNey/Downloads/keywords.csv", low_memory=False, encoding = 'utf8')
+credits = pd.read_csv("/Users/JeremyNey/Downloads/credits.csv", low_memory=False, encoding = 'utf8')
+
+#clean data
+metadata = metadata.drop([19730, 29503, 35587])
+metadata = metadata.loc[metadata['original_language'] == 'en']
+
+#mean rating across all movies
+c = metadata['vote_average'].mean()
+print(c)
+
+#minimum number of votes required to be included (top 90%)
+m = metadata['vote_count'].quantile(0.90)
+print(m)
+
+#CREATE NEW DATASET Q_MOVIES that only has movies if the count count is above the minimum m
+q_movies = metadata.copy().loc[metadata['vote_count'] >= m]
+
+#convert ID_column from str to int so we can join it later
+keywords['id'] = keywords['id'].astype('int')
+credits['id'] = credits['id'].astype('int')
+q_movies['id'] = q_movies['id'].astype('int')
+
+
+def weighted_rating(x, m=m, c=c):
+    v = x['vote_count']
+    r = x['vote_average']
+    return (v/(v+m) * r) + (m/(m+v) * c)
+
+#add a new column with the weighted score given the number of reviews
+q_movies['score'] = q_movies.apply(weighted_rating, axis=1)
+
+#sort by highest rated and print the top 15
+q_movies = q_movies.sort_values('score', ascending=False)
+q_movies[['title', 'vote_count', 'vote_average', 'score']].head(15)
+q_movies = q_movies.reset_index()
+tfidf = TfidfVectorizer(stop_words='english')
+#fill empty overview cells with a blank string
+q_movies['overview'] = q_movies['overview'].fillna('')
+
+tfidf_matrix = tfidf.fit_transform(q_movies['overview'])
+
+#Output the shape of tfidf_matrix showing number of rows and number of words
+tfidf_matrix.shape
+
+cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
+
+indices = pd.Series(q_movies.index, index=q_movies['title']).drop_duplicates()
+
+# Function that takes in movie title as input and outputs most similar movies
+def get_recommendations(title, cosine_sim=cosine_sim):
+    # Get the index of the movie that matches the title
+    idx = indices[title]
+
+    # Get the pairwsie similarity scores of all movies with that movie
+    sim_scores = list(enumerate(cosine_sim[idx]))
+
+    # Sort the movies based on the similarity scores
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+
+    # Get the scores of the 10 most similar movies
+    sim_scores = sim_scores[1:11]
+
+    # Get the movie indices
+    movie_indices = [i[0] for i in sim_scores]
+
+    # Return the top 10 most similar movies
+    return q_movies['title'].iloc[movie_indices]
+
+#see if it works!
+get_recommendations('The Dark Knight Rises')
+get_recommendations('The Godfather')
+
+# Merge keywords and credits into your main metadata dataframe
+q_movies = q_movies.merge(credits, on='id')
+q_movies = q_movies.merge(keywords, on='id')
+
+#iterate through the features and convert them into a usable form
+features = ['cast', 'crew', 'keywords', 'genres']
+for feature in features:
+    q_movies[feature] = q_movies[feature].apply(literal_eval)
+
+# Get the director's name from the crew column. If director is not listed, return NaN
+def get_director(x):
+    for i in x:
+        if i['job'] == 'Director':
+            return i['name']
+        return np.nan
+
+def get_list(x):
+    if isinstance(x, list):
+        names = [i['name'] for i in x]
+        #Check if more than 3 elements exist. If yes, return only first three. If no, return entire list.
+        if len(names) > 3:
+            names = names[:3]
+        return names
+
+    #Return empty list in case of missing/malformed data
+    return []
+
+#create a new column for the director
+q_movies['director'] = q_movies['crew'].apply(get_director)
+
+features = ['cast', 'keywords', 'genres']
+
+for feature in features:
+   q_movies[feature] = q_movies[feature].apply(get_list)
+
+q_movies[['title', 'cast', 'director', 'keywords', 'genres']].head(3)
+
+# Function to convert all strings to lower case and strip names of spaces i.e. Christain Bale becomes christianbale
+def clean_data(x):
+    if isinstance(x, list):
+        return [str.lower(i.replace(" ", "")) for i in x]
+    else:
+        #Check if director exists. If not, return empty string
+        if isinstance(x, str):
+            return str.lower(x.replace(" ", ""))
+        else:
+            return ''
+
+# Apply clean_data function to your features.
+features = ['cast', 'keywords', 'director', 'genres']
+
+for feature in features:
+    q_movies[feature] = q_movies[feature].apply(clean_data)
+    
+def create_soup(x):
+    return ' '.join(x['keywords']) + ' ' + ' '.join(x['cast']) + ' ' + x['director'] + ' ' + ' '.join(x['genres'])
+#add soup column, which is a merger of keywords, cast, and director which have all been joined together
+q_movies['soup'] = q_movies.apply(create_soup, axis=1)
+
+q_movies = q_movies.drop('adult',1)
+q_movies = q_movies.drop('homepage',1)
+q_movies = q_movies.drop('poster_path',1)
+q_movies = q_movies.drop('spoken_languages',1)
+q_movies = q_movies.drop('production_countries',1)
+q_movies = q_movies.drop('belongs_to_collection',1)
+
+q_movies[~q_movies.soup.str.contains("0xa0")]
+
+"""
+def clean(x):
+    for x in q_movies['soup']:
+        try:
+            y=x.encode('utf-8')
+        except:
+            q_movies[~q_movies.soup.str.contains(x)]
+            
+q_movies['clean_soup'] = q_movies.apply(clean, axis=1)
+"""
+
+count = CountVectorizer(stop_words='english')
+count_matrix = count.fit_transform(q_movies['soup'])
+
+cosine_sim2 = cosine_similarity(count_matrix, count_matrix)
+q_movies = q_movies.reset_index()
+indices = pd.Series(q_movies.index, index=q_movies['title'])
+get_recommendations('The Dark Knight Rises', cosine_sim2)

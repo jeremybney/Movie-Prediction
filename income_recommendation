@@ -15,18 +15,31 @@ import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import fbeta_score
 from sklearn.metrics import accuracy_score
-data = pd.read_csv("/Users/JeremyNey/Downloads/winequality-red.csv", sep=';')
+data = pd.read_csv("/Users/JeremyNey/Downloads/kaggle_income.csv")
+
+cols_to_remove = []
+
+for col in data.columns:
+    try:
+        _ = data[col].astype(float)
+    except ValueError:
+        print('Couldn\'t covert %s to float' % col)
+        cols_to_remove.append(col)
+        pass
+
+# keep only the columns in df that do not contain string
+data = data[[col for col in data.columns if col not in cols_to_remove]]
 
 #Defining the splits for categories. 1–4 will be poor quality, 5–6 will be average, 7–10 will be great
-bins = [1,4,6,10]
+bins = [0,20000,50000,250000]
 #0 for low quality, 1 for average, 2 for great quality
-quality_labels=[0,1,2]
-data['quality_categorical'] = pd.cut(data['quality'], bins=bins, labels=quality_labels, include_lowest=True)
+quality_labels=['poor','middle_income','rich']
+data['quality_categorical'] = pd.cut(data['Mean'], bins=bins, labels=quality_labels, include_lowest=True)
 #Displays the first 2 columns
 display(data.head(n=2))
 # Split the data into features and target label
 quality_raw = data['quality_categorical']
-features_raw = data.drop(['quality', 'quality_categorical'], axis = 1)
+features_raw = data.drop(['Mean', 'quality_categorical'], axis = 1)
 
 # Import train_test_split
 
@@ -184,14 +197,12 @@ print(best_clf)
 print("\nFinal accuracy score on the testing data: {:.4f}".format(accuracy_score(y_test, best_predictions)))
 print("Final F-score on the testing data: {:.4f}".format(fbeta_score(y_test, best_predictions, beta = 0.5,  average="micro")))
 
-"""Give inputs in this order: fixed acidity, volatile acidity, citric acid, residual sugar, chlorides, free sulfur dioxide,
-total sulfur dioxide, density, pH, sulphates, alcohol
-
+"""Give inputs in this order:	State_Code	Zip_Code	ALand	AWater	Lat	Lon	Mean	Median	Stdev	sum_w
 """
-wine_data = [[8, 0.2, 0.16, 1.8, 0.065, 3, 16, 0.9962, 3.42, 0.92, 9.5],
-            [7.3, 0.65, 0.0, 1.2, 0.065, 15.0, 21.0, 0.9946, 3.39, 0.47,	10.0],
-            [7.4, 2, 0.00, 1.9, 0.076, 11.0, 34.0, 0.9978, 3.51, 0.56, 0.6]]
+income_data = [[1,	36048,	26070325,  23254,	    31.708516,	-85.611039,	37725,	19528,	43789,	258.017684685],
+            [42,	19382,	604077,    0,	        39.93352,  	-75.530306,	242857,	300000,	25317,	0.59988],
+            [42,	17701,	2531864,	  553310,	   41.2335602,	-77.0225639,	15662,	8124,	18114, 53.327377763]]
                
 # Show predictions
-for i, quality in enumerate(best_clf.predict(wine_data)):
-    print("Predicted quality for Wine {} is: {}".format(i+1, quality))
+for i, quality in enumerate(best_clf.predict(income_data)):
+    print("Predicted category for income {} is: {}".format(i+1, quality))
